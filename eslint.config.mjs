@@ -12,24 +12,22 @@ import tseslint from 'typescript-eslint';
  * cresce, so diminui) via `--max-warnings=207` no CI/package.json, nao
  * escondida atras de regra desligada.
  *
- * CONTAGEM ATUAL: 272 (medida em 2026-09-24). Chegou a subir pra 314
- * (alinhamento da busca + fix do deadlock + testes novos) antes de cair
- * aqui — achado do usuario: 15 warnings novos num lote so e divida
- * acumulando no mesmo ritmo em que a antiga e paga, regra daqui pra
- * frente e codigo novo nao aumentar o ratchet. Causa raiz real, nao so
- * dos 2 arquivos novos: `INestApplication.getHttpServer()` sem o generic
- * e tipado `any` (`@nestjs/core/nest-application.d.ts`) — todo teste e2e
- * que faz `request(app.getHttpServer())` sem `app: INestApplication<Server>`
- * (de `node:http`) espalha `any` por `response.body` inteiro. Tipar o
- * generic nos 2 arquivos tocados nesta leva nao so zerou os 15 novos como
- * baixou 19 warnings JA EXISTENTES em conversations-admin-controller.e2e-spec.ts
- * (269->250 so nesse arquivo) — o generic ja existia na interface do
- * Nest, so ninguem usava. Os ~50 arquivos e2e restantes do projeto ainda
- * usam `INestApplication` sem o generic (divida antiga, ratcheada desde
- * o dia zero) — aplicar esse padrao neles e refactor separado, fora do
- * escopo pontual que gerou este achado. So desce a partir daqui. Se
- * corrigir alguma, baixe o numero em package.json/scripts/lint junto no
- * mesmo commit — nunca so aumente pra fazer o CI passar.
+ * CONTAGEM ATUAL: 239 (medida em 2026-09-25). Regra travada pelo usuario
+ * depois do achado de 2026-09-24 (299->272, ver historico do arquivo):
+ * "codigo novo nao aumenta o ratchet — se em algum caso for inevitavel,
+ * o motivo e dito ANTES de subir o numero, nao depois." Aplicada de
+ * verdade aqui: um lote de 4 arquivos de teste novos/tocados (rotas de
+ * paciente + agenda) tinha subido o numero pra 299 (+27) por causa do
+ * mesmo padrao ja identificado (`INestApplication` sem o generic
+ * `<Server>`, `response.body` sem tipo) — corrigido nos 4 antes de
+ * commitar, nao depois. Resultado: 239, MENOR que o 272 anterior (o
+ * fix nos 2 arquivos pre-existentes tocados no lote eliminou debito que
+ * ja estava la). Os arquivos e2e restantes do projeto ainda usam
+ * `INestApplication` sem o generic (divida antiga) — corrigido so
+ * quando o arquivo e tocado por outro motivo, nao um refactor em massa
+ * a parte. So desce a partir daqui. Se corrigir alguma, baixe o numero
+ * em package.json/scripts/lint junto no mesmo commit — nunca so aumente
+ * pra fazer o CI passar.
  *
  * Downgrade pra 'warn' e so pras regras SEM violacao hoje que o CLAUDE.md
  * ja exigia como inegociavel de verdade (no-explicit-any,

@@ -14,6 +14,8 @@ import { uniquePhone } from '../support/unique-phone';
 import { waitForQueueWorkersReady } from '../support/wait-for-queues-ready';
 import { alignedFutureSlot } from './support/seed-scheduling-fixtures';
 
+type ImpactBody = { professional?: { active: boolean }; procedure?: { durationMin: number }; rule?: { endTime: string }; affectedAppointments: Array<{ id: string }> };
+
 /**
  * Principio do usuario (revisao da Etapa 3): "catalogo define o futuro,
  * nao reescreve o passado." Os tres testes centrais deste arquivo provam
@@ -90,8 +92,9 @@ describe('CatalogAdminController — os 3 casos de impacto em consulta ja marcad
       .send({ active: false });
 
     expect(response.status).toBe(200);
-    expect(response.body.professional.active).toBe(false);
-    expect(response.body.affectedAppointments.map((a: { id: string }) => a.id)).toContain(appointment.id);
+    const body = response.body as ImpactBody;
+    expect(body.professional?.active).toBe(false);
+    expect(body.affectedAppointments.map((a) => a.id)).toContain(appointment.id);
 
     // A consulta continua CONFIRMED, intocada.
     const stillConfirmed = await prisma.appointment.findUniqueOrThrow({ where: { id: appointment.id } });
@@ -134,7 +137,7 @@ describe('CatalogAdminController — os 3 casos de impacto em consulta ja marcad
       .send({ durationMin: 90 });
 
     expect(response.status).toBe(200);
-    expect(response.body.procedure.durationMin).toBe(90);
+    expect((response.body as ImpactBody).procedure?.durationMin).toBe(90);
 
     // A consulta ja marcada continua com o endsAt ORIGINAL — nunca
     // recalculado a partir do durationMin novo do procedimento.
@@ -183,8 +186,9 @@ describe('CatalogAdminController — os 3 casos de impacto em consulta ja marcad
       .send({ endTime: '12:00' });
 
     expect(response.status).toBe(200);
-    expect(response.body.rule.endTime).toBe('12:00');
-    expect(response.body.affectedAppointments.map((a: { id: string }) => a.id)).toContain(appointment.id);
+    const ruleBody = response.body as ImpactBody;
+    expect(ruleBody.rule?.endTime).toBe('12:00');
+    expect(ruleBody.affectedAppointments.map((a) => a.id)).toContain(appointment.id);
 
     // A consulta continua CONFIRMED, no horario original — nunca movida.
     const stillConfirmed = await prisma.appointment.findUniqueOrThrow({ where: { id: appointment.id } });

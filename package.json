@@ -10,7 +10,7 @@
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main.js",
-    "lint": "eslint \"{src,test}/**/*.ts\" --max-warnings=272",
+    "lint": "eslint \"{src,test}/**/*.ts\" --max-warnings=239",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "vitest run --config vitest.config.ts test/**/*.e2e-spec.ts",
