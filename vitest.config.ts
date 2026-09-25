@@ -24,6 +24,10 @@ export default defineConfig({
     // pro porque — banco de teste nunca era limpo entre rodadas, e isso
     // e a causa raiz real de mais de uma classe de flakiness).
     globalSetup: ['./test/support/global-setup.ts'],
+    // Roda em CADA arquivo (diferente de globalSetup, uma vez so pra suite
+    // inteira) — ver comentario em flush-queues-after-each-file.ts pro
+    // porque isso precisa ser por arquivo, nao por rodada.
+    setupFiles: ['./test/support/flush-queues-after-each-file.ts'],
     testTimeout: 30000,
     // Default de 10s estourava esporadicamente no afterAll (app.close())
     // de specs e2e rodando perto de outras no mesmo arquivo de execucao —

@@ -23,5 +23,15 @@ export const TEST_REDIS_URL = 'redis://localhost:6379/1';
  * menos testado, sem adicionar seguranca nenhuma. So o teste especifico do
  * caminho desligado (`outbox-dispatch-disabled.e2e-spec.ts`) sobrescreve
  * pra "false" antes do proprio import do AppModule.
+ *
+ * Achado (2026-09-25): o risco real nao era "qual arquivo dispara o envio",
+ * e um job repetivel (SendAppointmentReminderJob) rodando em TODO arquivo
+ * com AppModule completo, que pode achar uma consulta CONFIRMED deixada
+ * por QUALQUER teste de agendamento dentro da janela de 24h e tentar
+ * mandar um lembrete de verdade — usando o adapter real na maioria dos
+ * arquivos, que nao tem motivo pra sobrescrever MESSAGING_PORT. O fix nao
+ * e mexer nesta flag: e test/support/flush-queues-after-each-file.ts,
+ * que zera as filas do BullMQ ao fim de CADA arquivo, pra nenhum job
+ * (nem o resultado de um lembrete real) sobreviver pro arquivo seguinte.
  */
 export const TEST_OUTBOX_DISPATCH_ENABLED = 'true';
