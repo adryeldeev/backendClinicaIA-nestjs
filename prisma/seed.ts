@@ -27,7 +27,30 @@ const DEV_PROFISSIONAL_PASSWORD = 'dev-profissional-senha-123';
  * duplicar a definicao. CLI (`npm run prisma:seed`) continua chamando via
  * main() abaixo.
  */
+/**
+ * Achado do usuario (2026-09-25): este seed cria 3 usuarios com senha
+ * FIXA e CONHECIDA (admin@clinica.dev, recepcao@clinica.dev,
+ * profissional@clinica.dev) — correto em dev, mas o codigo agora esta
+ * publico no GitHub, entao as senhas tambem estao. O risco real nao e
+ * alguem ler o codigo (a senha ja e publica de qualquer jeito) — e
+ * alguem rodar `npm run seed` apontando `DATABASE_URL` pra producao um
+ * dia (por engano, ou testando algo rapido) e deixar 3 contas de acesso
+ * conhecido num sistema com dado de saude. Mesma defesa do
+ * RETENTION_PURGE_ENABLED: aborta com erro claro, sem flag de escape —
+ * diferente daquela flag, nao existe motivo legitimo pra rodar ESTE
+ * seed especifico em producao (bootstrap de admin real e
+ * `npm run create-admin`, que recusa rodar se ja existe ADMIN e nunca
+ * usa senha fixa).
+ */
 export async function seedDatabase(prisma: PrismaClient): Promise<void> {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'seedDatabase() nunca roda em producao — cria usuarios com senha fixa e conhecida ' +
+        '(admin@clinica.dev/recepcao@clinica.dev/profissional@clinica.dev). ' +
+        'Pra criar o primeiro ADMIN de producao, use `npm run create-admin` (CreateFirstAdminUseCase).',
+    );
+  }
+
   const clinic = await prisma.clinic.create({
     data: {
       name: 'Clinica Bem Estar',
