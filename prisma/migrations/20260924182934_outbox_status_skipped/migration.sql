@@ -1,0 +1,11 @@
+-- Migration escrita a mao (nao pelo diff automatico do Prisma): a tentativa
+-- automatica via `prisma migrate dev` tentou "corrigir" objetos manuais nao
+-- representaveis no schema.prisma (KnowledgeChunk.content_tsv, indices
+-- HNSW/tsv), quebrando com erro 42601 (ver CLAUDE.md, mesma classe de
+-- pitfall ja documentada). So o necessario: adicionar SKIPPED ao enum.
+--
+-- Achado do usuario (2026-09-24): com OUTBOX_DISPATCH_ENABLED=false, o job
+-- marcava SENT sem ter chamado a WhatsApp Cloud API de verdade — o painel
+-- mostrava "entregue" pra mensagem que nunca saiu. SENT volta a significar
+-- uma coisa so: a Cloud API aceitou.
+ALTER TYPE "OutboxStatus" ADD VALUE 'SKIPPED';

@@ -1,0 +1,395 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+// ---------- Catalogo ----------
+
+model Clinic {
+  id            String         @id @default(uuid())
+  name          String
+  timezone      String         @default("America/Fortaleza")
+  addressLine   String
+  phone         String
+  aiEnabled     Boolean        @default(true) // RN-25: interruptor global do agente, independente do status de cada conversa
+  professionals Professional[]
+  procedures    Procedure[]
+  createdAt     DateTime       @default(now())
+}
+
+model Professional {
+  id            String   @id @default(uuid())
+  clinicId      String
+  clinic        Clinic   @relation(fields: [clinicId], references: [id])
+  name          String
+  specialty     String
+  councilNumber String? // CRM
+  active        Boolean  @default(true)
+
+  availabilityRules      AvailabilityRule[]
+  availabilityExceptions AvailabilityException[]
+  appointments           Appointment[]
+  procedures             ProcedureOnProfessional[]
+}
+
+model Procedure {
+  id             String   @id @default(uuid())
+  clinicId       String
+  clinic         Clinic   @relation(fields: [clinicId], references: [id])
+  name           String
+  durationMin    Int
+  priceCents     Int?
+  requiresReturn Boolean  @default(false)
+  active         Boolean  @default(true)
+
+  professionals ProcedureOnProfessional[]
+  appointments  Appointment[]
+}
+
+model ProcedureOnProfessional {
+  procedureId    String
+  professionalId String
+  procedure      Procedure    @relation(fields: [procedureId], references: [id])
+  professional   Professional @relation(fields: [professionalId], references: [id])
+
+  @@id([procedureId, professionalId])
+}
+
+model InsurancePlan {
+  id       String    @id @default(uuid())
+  name     String    @unique
+  accepted Boolean   @default(true)
+  notes    String?
+  patients Patient[]
+}
+
+// ---------- Disponibilidade ----------
+
+model AvailabilityRule {
+  id             String       @id @default(uuid())
+  professionalId String
+  professional   Professional @relation(fields: [professionalId], references: [id])
+  weekday        Int // 0 = domingo ... 6 = sabado
+  startTime      String // "08:00" — horario local da clinica
+  endTime        String // "12:00"
+  slotMinutes    Int          @default(30)
+
+  @@index([professionalId, weekday])
+}
+
+model AvailabilityException {
+  id             String       @id @default(uuid())
+  professionalId String
+  professional   Professional @relation(fields: [professionalId], references: [id])
+  startsAt       DateTime // UTC
+  endsAt         DateTime // UTC
+  reason         String?
+  blocking       Boolean      @default(true) // false = disponibilidade extra
+
+  @@index([professionalId, startsAt])
+}
+
+// ---------- Pacientes e consultas ----------
+
+model Patient {
+  id            String         @id @default(uuid())
+  phoneE164     String         @unique
+  name          String?
+  birthDate     DateTime?
+  insuranceId   String?
+  insurance     InsurancePlan? @relation(fields: [insuranceId], references: [id])
+  appointments  Appointment[]
+  conversations Conversation[]
+  createdAt     DateTime       @default(now())
+}
+
+enum AppointmentStatus {
+  HELD
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+  EXPIRED
+}
+
+model Appointment {
+  id             String            @id @default(uuid())
+  professionalId String
+  professional   Professional      @relation(fields: [professionalId], references: [id])
+  patientId      String
+  patient        Patient           @relation(fields: [patientId], references: [id])
+  procedureId    String
+  procedure      Procedure         @relation(fields: [procedureId], references: [id])
+
+  startsAt      DateTime // UTC
+  endsAt        DateTime // UTC
+  status        AppointmentStatus @default(HELD)
+  holdExpiresAt DateTime?
+  cancelReason  String?
+  lateCancellation Boolean        @default(false) // RN-12: cancelado com menos de LATE_CANCEL_HOURS de antecedencia
+  // "agent" | "human" (ver AppointmentCreatedBy) — achado da Fase 6
+  // (metricas de resolucao): campo existia desde a Fase 2 mas nunca era
+  // setado em lugar nenhum do codigo, todo agendamento (inclusive os
+  // manuais do painel) caia no default. HoldSlotUseCase agora exige o
+  // valor explicito em toda chamada, sem default silencioso.
+  createdBy     String            @default("agent")
+  reminderSentAt DateTime? // Fase 5: lembrete de 24h ja enviado — evita duplicar envio a cada tick do job
+
+  version   Int      @default(0) // lock otimista
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([professionalId, startsAt])
+  @@index([patientId, status])
+  @@index([status, holdExpiresAt])
+  @@index([status, startsAt, reminderSentAt])
+}
+
+// ---------- Conversa ----------
+
+enum ConversationStatus {
+  BOT
+  AWAITING_HUMAN
+  HUMAN
+  CLOSED
+}
+
+enum SchedulingStep {
+  IDLE
+  COLLECTING_DATA
+  SLOTS_OFFERED
+  SLOT_HELD
+  CONFIRMED
+}
+
+model Conversation {
+  id              String              @id @default(uuid())
+  patientId       String
+  patient         Patient             @relation(fields: [patientId], references: [id])
+  status          ConversationStatus  @default(BOT)
+  schedulingStep  SchedulingStep      @default(IDLE)
+  context         Json                @default("{}") // dados coletados parciais
+  lastInboundAt   DateTime?
+  windowExpiresAt DateTime? // janela de 24h do WhatsApp
+  // RN-16: turnos consecutivos que terminaram em llm_error (falha
+  // transitoria de LLM). Zera em qualquer turno que NAO termine em
+  // llm_error (resposta normal ou escalada por outro motivo). Ao atingir
+  // LLM_ERROR_ESCALATION_THRESHOLD, ReprocessStuckTurnsJob escala pra
+  // humano em vez de reenfileirar de novo — sem isso, instabilidade
+  // sustentada do provedor reprocessava a mesma conversa pra sempre.
+  consecutiveLlmErrors Int @default(0)
+  // Quem do painel esta cuidando desta conversa agora — achado do front
+  // (contrato da Fase 1): sem isso, duas recepcionistas podem assumir a
+  // mesma conversa escalada sem nenhuma sinalizar pra outra. Setado no
+  // takeover (explicito OU implicito via RN-26), limpo no release.
+  assignedUserId  String?
+  assignedUser    User?               @relation("ConversationAssignedUser", fields: [assignedUserId], references: [id])
+  messages        Message[]
+  // RN-22 (expurgo por retencao) le ISSO, nunca `updatedAt` — achado do
+  // usuario: `updatedAt` e infraestrutura do ORM, sobe a qualquer toque na
+  // linha (assignedUserId setado, job mudando status), sem relacao
+  // nenhuma com atividade real do paciente. Usar `updatedAt` pra decidir
+  // retencao significa que uma alteracao administrativa estende
+  // silenciosamente o prazo de guarda de dado sensivel — problema de LGPD,
+  // nao so de testabilidade. Estampado explicitamente pelo Clock em toda
+  // criacao de Conversation/Message (nunca herda so do default abaixo,
+  // que existe so como rede de seguranca pra escrita direta de teste que
+  // nao se importa com isso).
+  lastActivityAt  DateTime            @default(now())
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([patientId, status])
+}
+
+enum MessageRole {
+  PATIENT
+  AGENT
+  HUMAN
+  SYSTEM
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  role           MessageRole
+  content        String
+  toolCalls      Json?
+  externalId     String?      @unique // wamid
+  consumedAt     DateTime? // null = ainda nao entrou em nenhum turno do orquestrador (Fase 3)
+  // Liga a mensagem (AGENT/HUMAN) ao envio que a entrega — o painel precisa
+  // mostrar status de entrega por mensagem (achado do front, contrato da
+  // Fase 1). So AGENT/HUMAN tem: PATIENT/SYSTEM nunca sao enviadas.
+  // Setado na CRIACAO da Message (nao depois) — OutboxMessage e criado
+  // primeiro, o id passa pro create() da Message; se o processo morrer
+  // entre os dois, o pior caso e a Message nao existir ainda (o envio ja
+  // aconteceu do jeito certo), nunca uma Message "fantasma" sem status.
+  outboxMessageId String?        @unique
+  outboxMessage    OutboxMessage? @relation(fields: [outboxMessageId], references: [id])
+  // Quem mandou uma mensagem HUMAN — sem isso, "duas recepcionistas" no
+  // mesmo atendimento aparecem como a mesma voz sem nome (achado do front,
+  // contrato da Fase 1). Sempre null pra PATIENT/AGENT/SYSTEM.
+  authorUserId   String?
+  authorUser     User?        @relation("MessageAuthor", fields: [authorUserId], references: [id])
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+}
+
+model HandoffTicket {
+  id             String    @id @default(uuid())
+  conversationId String
+  reason         String
+  summary        String
+  resolvedAt     DateTime?
+  createdAt      DateTime  @default(now())
+}
+
+// ---------- Infra de mensageria ----------
+
+model InboundEvent {
+  id          String    @id @default(uuid())
+  externalId  String    @unique // wamid — chave de idempotencia
+  payload     Json
+  processedAt DateTime?
+  createdAt   DateTime  @default(now())
+}
+
+enum OutboxStatus {
+  PENDING
+  SENT
+  FAILED
+  // Achado do usuario (2026-09-24): com OUTBOX_DISPATCH_ENABLED=false, o
+  // job marcava SENT sem ter chamado a WhatsApp Cloud API de verdade — o
+  // painel mostrava "entregue" pra mensagem que nunca saiu. SENT volta a
+  // significar uma coisa so: a Cloud API aceitou. Dispatch desligado marca
+  // SKIPPED.
+  SKIPPED
+}
+
+model OutboxMessage {
+  id           String       @id @default(uuid())
+  toPhoneE164  String
+  body         String
+  templateName String?
+  templateArgs Json?
+  status       OutboxStatus @default(PENDING)
+  attempts     Int          @default(0)
+  lastError    String?
+  sentAt       DateTime?
+  createdAt    DateTime     @default(now())
+  message      Message?
+
+  @@index([status, createdAt])
+}
+
+// ---------- Painel administrativo ----------
+
+enum UserRole {
+  ADMIN
+  RECEPCAO
+  PROFISSIONAL
+}
+
+model User {
+  id             String    @id @default(uuid())
+  email          String    @unique
+  passwordHash   String // argon2id
+  name           String
+  role           UserRole
+  professionalId String? // obrigatorio quando role = PROFISSIONAL
+  active         Boolean   @default(true)
+  lastLoginAt    DateTime?
+  sessions       Session[]
+  assignedConversations Conversation[] @relation("ConversationAssignedUser")
+  authoredMessages      Message[]      @relation("MessageAuthor")
+  createdAt      DateTime  @default(now())
+}
+
+model Session {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique // hash do valor do cookie, nunca o valor cru
+  expiresAt  DateTime
+  ip         String?
+  userAgent  String?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, expiresAt])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorType  String // user | agent | system
+  actorId    String?
+  action     String // appointment.confirm | patient.read | knowledge.update | ...
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([actorId, createdAt])
+  // Suporta a checagem de deduplicacao do AuditInterceptor (SEC-10, achado
+  // do front: polling de 5s gerava ~11 mil linhas/dia/recepcionista sem
+  // sinal nenhum) — busca "ja existe um evento igual dentro da janela?"
+  // antes de gravar, sem varrer a tabela.
+  @@index([actorId, entityType, entityId, action, createdAt])
+}
+
+// ---------- Conhecimento (RAG) ----------
+
+enum KnowledgeDocumentStatus {
+  PENDING // rascunho criado, job de chunking+embedding ainda nao rodou
+  RUNNING // job processando
+  READY // versao completa e servindo buscas (junto com active:true)
+  FAILED // job esgotou tentativas — versao anterior (active:true) nunca deixou de servir
+}
+
+model KnowledgeDocument {
+  id           String                  @id @default(uuid())
+  title        String
+  category     String // preparo_exame | convenio | localizacao | procedimento | geral
+  sourceRef    String?
+  content      String
+  version      Int                     @default(1)
+  // Fase 6 (Etapa 5): active so vira true numa transacao, depois que TODOS
+  // os chunks da versao foram inseridos com sucesso (troca atomica) — a
+  // versao anterior com o mesmo sourceRef continua active:true e servindo
+  // buscas ate esse momento. Ver ManageKnowledgeDocuments/ReindexDocumentUseCase.
+  active       Boolean                 @default(true)
+  status       KnowledgeDocumentStatus @default(READY)
+  errorMessage String?
+  chunks       KnowledgeChunk[]
+  createdAt    DateTime                @default(now())
+  updatedAt    DateTime                @updatedAt
+}
+
+model KnowledgeChunk {
+  id         String                       @id @default(uuid())
+  documentId String
+  document   KnowledgeDocument            @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  ordinal    Int
+  content    String
+  tokenCount Int
+  embedding  Unsupported("vector(768)")?
+  // Declarado aqui so pra o Prisma saber que a coluna existe e nao a
+  // considere "drift" a corrigir num migrate dev futuro — foi assim que
+  // ela sumiu sem querer na Fase 2 (coluna gerada tsvector, invisivel
+  // pro schema.prisma, dropada como "limpeza"). GENERATED ALWAYS AS ...
+  // STORED continua so na migration manual (Prisma nao gera isso).
+  contentTsv Unsupported("tsvector")?     @map("content_tsv")
+
+  @@index([documentId])
+}

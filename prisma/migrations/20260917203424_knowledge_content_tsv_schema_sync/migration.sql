@@ -1,0 +1,14 @@
+-- Migration gerada automaticamente por `prisma migrate dev` (nao escrita
+-- a mao) na Fase 4: o Prisma tentou "corrigir" a coluna gerada
+-- content_tsv e o indice GIN que `20260917180000_knowledge_content_tsv`
+-- ja tinha criado, gerando um ALTER COLUMN incompativel com coluna
+-- gerada (erro 42601). Nunca aplicou de verdade — a transacao reverteu
+-- sozinha, e foi marcada `prisma migrate resolve --rolled-back`.
+--
+-- Conteudo trocado para no-op: o SQL original quebrado impedia pra
+-- sempre o replay em shadow database (`prisma migrate dev` sempre tenta
+-- re-simular a cadeia inteira do zero, independente do status no ledger
+-- real). Pasta mantida (nao apagar) so pra bater com o registro
+-- historico em _prisma_migrations — nao ha SQL de verdade pra rodar
+-- aqui, o efeito pretendido (nenhum) ja e realidade desde sempre.
+SELECT 1;

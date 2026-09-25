@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: clinica
+    ports:
+      - "55432:5432"
+    volumes:
+      - clinica_postgres_data:/var/lib/postgresql/data
+      # So roda em volume novo (docker-entrypoint-initdb.d nao retroage) —
+      # cria o banco de teste dedicado (clinica_test), separado do banco de
+      # desenvolvimento (clinica). Ver docker/init-test-db.sql e SPEC.md §4.
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d clinica"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - clinica_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  clinica_postgres_data:
+  clinica_redis_data:

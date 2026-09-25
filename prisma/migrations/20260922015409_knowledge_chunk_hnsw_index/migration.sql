@@ -1,0 +1,12 @@
+-- Fase 6 (Etapa 5): decisao tomada agora, nao adiada de novo (pendente desde
+-- a Fase 0/4 — "so depois que a base real for populada", ver SPEC.md secao
+-- 11). O painel admin passa a ser o jeito real de popular a base a partir
+-- desta etapa.
+--
+-- Sem CONCURRENTLY (ao contrario do comentario antigo em
+-- scripts/ingest-knowledge.ts): base de conhecimento de uma clinica e
+-- pequena (dezenas a poucas centenas de chunks), o lock breve durante a
+-- criacao nao compete com nenhum caminho quente de escrita, e
+-- CONCURRENTLY nao pode rodar dentro da transacao que o Prisma usa por
+-- padrao pra migration.
+CREATE INDEX "knowledge_chunk_embedding_hnsw" ON "KnowledgeChunk" USING hnsw (embedding vector_cosine_ops);

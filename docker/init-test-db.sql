@@ -1,0 +1,12 @@
+-- Roda automaticamente na PRIMEIRA inicializacao do volume do Postgres
+-- (docker-entrypoint-initdb.d so executa em volume novo/vazio — nao
+-- retroage sobre um volume ja existente). Cria o banco de teste dedicado,
+-- separado do banco de desenvolvimento ("clinica", criado por POSTGRES_DB).
+--
+-- Achado do usuario (dois incidentes em dois dias, 2026-09-23): a suite de
+-- testes e a aplicacao rodando localmente compartilhavam o MESMO Postgres e
+-- o MESMO Redis — nao so o mesmo container, o mesmo banco/DB logico. Uma
+-- suite e uma aplicacao viva disputando os mesmos dados geravam fixture
+-- orfa sendo varrida pelo RN-16 da aplicacao real, e vice-versa. Ver
+-- SPEC.md secao 4 e CLAUDE.md.
+CREATE DATABASE clinica_test;
