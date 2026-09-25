@@ -1,0 +1,99 @@
+name: clinica-api-ci
+
+# Achado do usuario (2026-09-25): SPEC.md secao 5 (nota dos criterios de
+# aceite #18/#19) e CLAUDE.md ja descreviam este workflow como existente
+# ("rodando em CI a cada push/PR") desde 2026-09-23 — o arquivo nunca foi
+# criado de verdade, so documentado. Feito agora, antes do repositorio
+# ficar publico, pra SPEC.md deixar de descrever algo que nao existe.
+#
+# Servicos Postgres/Redis efemeros por execucao (ver SPEC.md secao 4):
+# nao compartilham dado com nada — cada run do CI tem os seus, criados e
+# destruidos junto do job. Postgres usa a mesma imagem do docker-compose.yml
+# (pgvector/pgvector:pg16) porque as migrations dependem da extensao
+# pgvector (KnowledgeChunk.embedding) e btree_gist (constraint de
+# exclusao appointment_no_overlap) — uma imagem postgres generica nao tem
+# os binarios da extensao instalados, so CREATE EXTENSION nao bastaria.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: clinica_test
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d clinica_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Mesmos nomes/portas do docker-compose.yml e test/support/test-env.ts,
+      # por consistencia (nao por necessidade — nada mais disputa este
+      # Postgres/Redis neste job). SESSION_SECRET so precisa ser nao-vazio
+      # (z.string().min(1), sem validacao de conteudo) — nunca e o secret
+      # de producao real, que nunca entra em CI.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:55432/clinica_test
+      REDIS_URL: redis://localhost:6379/1
+      SESSION_SECRET: ci-placeholder-secret-nao-e-producao
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Prisma generate
+        run: npx prisma generate
+
+      - name: Aplica migrations no banco efemero do CI
+        run: npx prisma migrate deploy
+
+      - name: Type-check
+        run: npx tsc --noEmit
+
+      - name: Lint (ratchet — ver eslint.config.mjs)
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      # Criterios de aceite #18/#19 (SPEC.md secao 16): MM-01 (import so
+      # pelo index.ts), MM-04 (domain/ nao importa framework/infra), MM-05
+      # (sem ciclo).
+      - name: Dependency graph (MM-01/04/05)
+        run: npm run depcruise
+
+      # Trava contra `repeat:` do BullMQ aparecer fora de
+      # shared/queue/register-repeatable-job.ts (achado do incidente de
+      # 2026-09-23, ver CLAUDE.md).
+      - name: Repeatable jobs registration guard
+        run: npm run check:repeatables
+
+      - name: Suite completa
+        run: npm test
